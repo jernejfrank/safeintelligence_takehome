@@ -23,7 +23,7 @@ class PGDAttack():
         self.steps = steps
         self.loss_function = nn.BCEWithLogitsLoss()
 
-    def perturb(self, input: torch.Tensor, label: Literal[0, 1]) -> torch.Tensor | None:
+    def perturb(self, input: torch.Tensor, label: Literal[0, 1], random_start: bool = False) -> torch.Tensor | None:
         """
         Given a new data point (x, y, z) and its label, return the adversarial
         counterpart of the data point.
@@ -47,6 +47,10 @@ class PGDAttack():
         # Ensure input is on the same device as the model
         x = input.to(device)
         x_adv = x.clone()
+
+        # Point in the vicinity of x, sampled from U~(-epsilon,epsilon)
+        if random_start:
+            x_adv += 2*self.epsilon*torch.rand_like(x_adv) - self.epsilon
 
         # Define the lower and upper bounds of the input perturbation region
         lower_bounds = x - self.epsilon
