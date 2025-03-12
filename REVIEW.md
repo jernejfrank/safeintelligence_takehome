@@ -40,3 +40,24 @@ In this example it is alright to keep it as a variable, but I imagine in a more 
 context we would be thinking about having something like a metric parent class and then
 subclass it from there so that we can build a structured collection of different metrics
 that can be chosen from to evaluate the models performance.
+
+
+
+Some Afterthoughts:
+
+- For the repo we could also do CI/CD to automatically run tests when merging to `main` 
+(and test that all Python versions 3.8-3.13 are supported) and publish the changes.
+
+- Use semantic versioning for more transparency with breaking changes to the APIs.
+
+- Add a Changelog to keep track of changes.
+
+- Now the model gets retrained every time. We can keep track of different parameter
+inputs and safe the models for comparison using something like `mlflow`.
+
+- If public, host docs for API reference and use-cases/concepts for an high-level 
+overview how to use the package. Can also be automated in CI/CD. 
+
+- Replace `print` statements with a `logger` for better control and experience.
+
+- Containerising the application.
