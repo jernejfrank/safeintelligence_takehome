@@ -24,6 +24,9 @@ if __name__ == "__main__":
     correct_indices = (predictions == dataset.labels.squeeze()).nonzero(as_tuple=True)[
         0
     ]
+    
+    # PGD Attack
+    pgd = PGDAttack(model, epsilon=0.3, steps=5)
 
     correct_predictions_after_pgd = 0
 
@@ -34,8 +37,7 @@ if __name__ == "__main__":
         correct_input = correct_item[0].squeeze()
         correct_label: Literal[0, 1] = 1 if correct_item[1].item() == 1 else 0
 
-        # PGD Attack
-        pgd = PGDAttack(model, epsilon=0.3, steps=5)
+        
         perturbed_point = pgd.perturb(correct_input.unsqueeze(0), correct_label)
 
         # If an adversarial example was found
@@ -45,10 +47,6 @@ if __name__ == "__main__":
             pert_output = model.predict(perturbed_input)
             pert_prediction: Literal[0, 1] = 1 if pert_output.item() == 1 else 0
 
-            # For calculating robust accuracy
-            if correct_label == pert_prediction:
-                correct_predictions_after_pgd += 1
-
             border = "green" if correct_label == 1 else "blue"
 
             # Plot the correct point
@@ -56,6 +54,10 @@ if __name__ == "__main__":
 
             # Plot the perturbed point
             dataset.plot_point(perturbed_input, "red", border)
+        else:
+            # For calculating robust accuracy, if perturbed point is None PGD failed
+            correct_predictions_after_pgd += 1
+
 
     # Print Robust Accuracy
     print_header("Robust Accuracy")

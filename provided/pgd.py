@@ -1,29 +1,68 @@
-import torch.nn as nn
-import torch
+import copy
 from typing import Literal
 
-class PGDAttack():
+import torch
+import torch.nn as nn
+
+
+class PGDAttack:
     """
     Projected Gradient Descent Attack.
     """
 
-    def __init__(self, model: nn.Module,
-                 epsilon: float = 0.1, steps: int = 100):
+    @staticmethod
+    def is_a_counterexample(
+        x_adv: torch.Tensor,
+        perturbed_prediction: torch.Tensor,
+        label: Literal[0, 1],
+        current_epsilon: float,
+    ) -> bool:
+        """
+        Returns True if the model misclassifies the perturbed input.
+
+        Args:
+            x_adv (torch.Tensor):   The coordinates of a potential counterexample.
+                                    Expected shape: (1, 3).
+            label (Literal[0, 1]): Label of the data point.
+
+        Returns:
+            bool:                   Whether the x_adv point is an adversarial
+                                    counterexample that has been mislabelled.
+        """
+        misclassified = perturbed_prediction.item() != label
+        if misclassified:
+            epsilon_str = f"Epsilon: {current_epsilon:6.4f}"
+            input_str = f"Adversarial Input: {x_adv.squeeze().cpu().numpy()}"
+            print(f"{epsilon_str} → {input_str}")
+        return misclassified
+
+    def __init__(
+        self,
+        model: nn.Module,
+        epsilon: float = 0.1,
+        steps: int = 100,
+    ):
         """
         Initialize the PGD attack.
 
         Args:
-            model (nn.Module): Model to attack.
             epsilon (float): Maximum perturbation allowed.
             steps (int): Number of attack iterations.
         """
-        self.model = model
+        # we shouldn't touch original model
+        self.model = copy.deepcopy(model)
+
         self.epsilon = epsilon
         self.alpha = epsilon / steps
         self.steps = steps
+
+        # This binds us to only models trained with this loss, better to keep this as
+        # user input
         self.loss_function = nn.BCEWithLogitsLoss()
 
-    def perturb(self, input: torch.Tensor, label: Literal[0, 1], random_start: bool = False) -> torch.Tensor | None:
+    def perturb(
+        self, input: torch.Tensor, label: Literal[0, 1], random_start: bool = False
+    ) -> torch.Tensor | None:
         """
         Given a new data point (x, y, z) and its label, return the adversarial
         counterpart of the data point.
@@ -36,8 +75,8 @@ class PGDAttack():
         Returns:
             torch.Tensor | None: Input coordinates of the adversarial example.
         """
-        
-        # Set the model to evaluation mode 
+
+        # Set the model to evaluation mode
         # (it doesn't change during the attack)
         self.model.eval()
 
@@ -50,7 +89,7 @@ class PGDAttack():
 
         # Point in the vicinity of x, sampled from U~(-epsilon,epsilon)
         if random_start:
-            x_adv += 2*self.epsilon*torch.rand_like(x_adv) - self.epsilon
+            x_adv += 2 * self.epsilon * torch.rand_like(x_adv) - self.epsilon
 
         # Define the lower and upper bounds of the input perturbation region
         lower_bounds = x - self.epsilon
@@ -62,16 +101,24 @@ class PGDAttack():
         # Take up to self.steps of size self.alpha in the direction that increases
         # the loss and check if the perturbed point is a counterexample.
         for step in range(self.steps):
-            x_adv = self.take_perturb_step(x_adv, target, lower_bounds, upper_bounds)
-            if self.is_a_counterexample(x_adv, label, step):
+            x_adv = self._take_perturb_step(x_adv, target, lower_bounds, upper_bounds)
+            if self.is_a_counterexample(
+                x_adv=x_adv,
+                perturbed_prediction=self.model.predict(x_adv),
+                label=label,
+                current_epsilon=(self.alpha * (step + 1)),
+            ):
                 return x_adv
 
         return None
 
-    def take_perturb_step(self, x_adv: torch.Tensor,
-                          target: torch.Tensor,
-                          lower_bound: torch.Tensor,
-                          upper_bound: torch.Tensor) -> torch.Tensor:
+    def _take_perturb_step(
+        self,
+        x_adv: torch.Tensor,
+        target: torch.Tensor,
+        lower_bound: torch.Tensor,
+        upper_bound: torch.Tensor,
+    ) -> torch.Tensor:
         """
         Updates the potential counter example point by taking a step of size alpha in
         the direction of the sign of the gradients. The updated point is clamped to be
@@ -93,40 +140,16 @@ class PGDAttack():
         """
 
         # Take a step of size alpha in the direction of the sign of the gradients
-        x_gradients = self.calculate_gradients(x_adv, target)
-        assert x_gradients is not None
+        x_gradients = self._calculate_gradients(x_adv, target)
         x_adv = x_adv + self.alpha * x_gradients.sign()
 
         # Clip within bounds
         x_adv = torch.clamp(x_adv, lower_bound, upper_bound)
         return x_adv.detach()
 
-    def is_a_counterexample(self, x_adv: torch.Tensor,
-                            label: Literal[0, 1],
-                            step: int) -> bool:
-        """
-        Returns True if the model misclassifies the perturbed input.
-
-        Args:
-            x_adv (torch.Tensor):   The coordinates of a potential counterexample.
-                                    Expected shape: (1, 3).
-            label (Literal[0, 1]): Label of the data point.
-
-        Returns:
-            bool:                   Whether the x_adv point is an adversarial
-                                    counterexample that has been mislabelled.
-        """
-        with torch.no_grad():
-            predicted = torch.sigmoid(self.model(x_adv)).round()
-            misclassified = predicted.item() != label
-            if misclassified:
-                epsilon_str = f"Epsilon: {(self.alpha * (step + 1)):6.4f}"
-                input_str = f"Adversarial Input: {x_adv.squeeze().cpu().numpy()}"
-                print(f"{epsilon_str} → {input_str}")
-            return misclassified
-
-    def calculate_gradients(self, x_adv: torch.Tensor,
-                            target: torch.Tensor) -> torch.Tensor:
+    def _calculate_gradients(
+        self, x_adv: torch.Tensor, target: torch.Tensor
+    ) -> torch.Tensor:
         """
         Calculates the gradients of the loss function of the model outputs to the
         input x_adv.
@@ -155,6 +178,7 @@ class PGDAttack():
         # Ensure gradients are not None
         if x_adv.grad is None:
             raise RuntimeError(
-                "Gradients were not computed. Ensure x_adv is a tensor and requires_grad=True.")
+                "Gradients were not computed. Ensure x_adv is a tensor and requires_grad=True."
+            )
 
         return x_adv.grad
